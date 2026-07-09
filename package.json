@@ -1,0 +1,42 @@
+{
+  "name": "shellmon",
+  "version": "3.1.0",
+  "description": "A terminal pet that feeds on your dev activity — any test runner, any build, any command. Species, live watch mode, achievements, themes. Zero dependencies.",
+  "type": "module",
+  "bin": {
+    "shellmon": "./cli.mjs"
+  },
+  "files": [
+    "cli.mjs"
+  ],
+  "scripts": {
+    "start": "node cli.mjs",
+    "test": "node --test && bash test/shell-integration.sh",
+    "test:unit": "node --test",
+    "test:shell": "bash test/shell-integration.sh",
+    "pub": "npm test && npm version patch && npm publish"
+  },
+  "keywords": [
+    "cli",
+    "terminal",
+    "pet",
+    "tamagotchi",
+    "tui",
+    "git",
+    "git-hook",
+    "prompt",
+    "productivity",
+    "achievements",
+    "themes",
+    "zero-dependency"
+  ],
+  "author": "shwetank",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shwetank/shellmon.git"
+  }
+}
