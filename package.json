@@ -1,6 +1,6 @@
 {
   "name": "shellmon",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "A terminal pet that feeds on your dev activity — any test runner, any build, any command. Species, live watch mode, achievements, themes. Zero dependencies.",
   "type": "module",
   "bin": {
@@ -14,7 +14,7 @@
     "test": "node --test && bash test/shell-integration.sh",
     "test:unit": "node --test",
     "test:shell": "bash test/shell-integration.sh",
-    "pub": "npm test && npm version patch && npm publish"
+    "pub": "npm test && npm publish"
   },
   "keywords": [
     "cli",

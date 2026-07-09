@@ -49,6 +49,18 @@ if command -v bash >/dev/null 2>&1; then
   grep -q "READY>" "$OUT"; report "base PS1 is preserved (snippet appends, not clobbers)" $?
 fi
 
+# ---- zsh ----
+# Regression: the snippet must APPEND to an existing RPROMPT, not clobber it.
+if command -v zsh >/dev/null 2>&1; then
+  echo "[zsh] interactive right prompt renders the pet"
+  ZD="$WORK/zdot"; mkdir -p "$ZD"
+  { echo 'PROMPT="READY> "'; echo 'RPROMPT="[base]"'; snippet zsh; } > "$ZD/.zshrc"
+  OUT="$WORK/out_zsh.txt"
+  printf 'true\nexit\n' | ZDOTDIR="$ZD" script -q -e -c "zsh -i" "$OUT" >/dev/null 2>&1
+  grep -q "TESTPET" "$OUT"; report "pet name appears in the zsh right prompt" $?
+  grep -q "\[base\]" "$OUT"; report "existing RPROMPT is preserved (snippet appends, not clobbers)" $?
+fi
+
 # ---- fish ----
 # fish's full interactive prompt under a PTY is polluted by system config on many
 # machines, so test the snippet's mechanism directly: source it (proves it parses)

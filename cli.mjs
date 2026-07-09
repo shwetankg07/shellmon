@@ -12,7 +12,7 @@ import os from 'node:os';
 import { execSync, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-export const VERSION = '3.1.0';
+export const VERSION = '3.2.0';
 
 // ---------- paths (lazy, so SHELLMON_HOME can be swapped per-test) ----------
 export function dir() { return process.env.SHELLMON_HOME || path.join(os.homedir(), '.shellmon'); }
@@ -24,7 +24,11 @@ function ensureDir() { fs.mkdirSync(dir(), { recursive: true }); }
 const NAMES = ['Blip', 'Byte', 'Momo', 'Pixel', 'Sprocket', 'Nibble', 'Gizmo', 'Pip', 'Taro', 'Echo', 'Bit', 'Waffle', 'Noodle', 'Kernel'];
 
 // ---------- themes (zero-dep truecolor; 'classic' uses base ANSI) ----------
+// Null prototype: these tables are looked up with user-supplied keys, and a
+// plain object would answer `THEMES.constructor` with a function — truthy, so
+// it sails past every `if (THEMES[name])` guard and corrupts state downstream.
 export const THEMES = {
+  __proto__: null,
   classic:   { red: '31', green: '32', yellow: '33', blue: '34', magenta: '35', cyan: '36', white: '37', gray: '90' },
   matrix:    { red: '#ff3355', green: '#00ff66', yellow: '#7CFC00', blue: '#00aa44', magenta: '#39ff14', cyan: '#00ffaa', white: '#c8ffc8', gray: '#2f6f3f' },
   dracula:   { red: '#ff5555', green: '#50fa7b', yellow: '#f1fa8c', blue: '#bd93f9', magenta: '#ff79c6', cyan: '#8be9fd', white: '#f8f8f2', gray: '#6272a4' },
@@ -49,6 +53,7 @@ export function hexToRgb(hex) {
 let colorOverride = null; // null = auto, true/false = forced
 function colorOn() {
   if ('NO_COLOR' in process.env) return false;
+  if (process.env.FORCE_COLOR === '0') return false; // per convention, 0 means off
   if (colorOverride !== null) return colorOverride;
   return !!(process.env.FORCE_COLOR || process.stdout.isTTY);
 }
@@ -66,7 +71,17 @@ export function paint(role, s) {
   return code ? `\x1b[${code}m${s}\x1b[0m` : String(s);
 }
 export function stripAnsi(s) { return String(s).replace(/\x1b\[[0-9;]*m/g, ''); }
-export function vlen(s) { return stripAnsi(s).length; }
+// Display width, not code units: CJK and emoji occupy two terminal columns and
+// combining marks none — counting .length let a pet named 猫猫猫 shear the box.
+// The wide set is pragmatic (CJK blocks + the emoji plane), deliberately not
+// touching the box-drawing/block/dingbat ranges the UI itself is built from.
+const WIDE_RE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F000}-\u{1FAFF}]/u;
+const ZERO_RE = /[\p{M}\u200B-\u200D\uFEFF]/u;
+export function vlen(s) {
+  let w = 0;
+  for (const ch of stripAnsi(s)) w += ZERO_RE.test(ch) ? 0 : WIDE_RE.test(ch) ? 2 : 1;
+  return w;
+}
 export function pad(s, w, align = 'left') {
   const gap = Math.max(0, w - vlen(s));
   if (align === 'center') { const l = Math.floor(gap / 2); return ' '.repeat(l) + s + ' '.repeat(gap - l); }
@@ -93,6 +108,7 @@ export function nextStage(xp) {
 // Four species, each with five evolution stages. The `${f}` slot holds the
 // 3-char mood face. The box centers every line, so widths need not match.
 export const SPECIES = {
+  __proto__: null, // keyed by user input (`species <name>`, state.json) — see THEMES
   slime: { name: 'Slime', stages: {
     egg:     (f) => ['  .-.', ' ( . )', "  '-'"],
     blob:    (f) => [' .---.', `( ${f} )`, " '---'"],
@@ -322,7 +338,9 @@ export function renderSvg(s) {
   y += 26;
   for (const ln of art) { el.push(`<text x="${artX.toFixed(1)}" y="${y}" font-size="${fsz}" fill="${acc}" xml:space="preserve">${xmlEsc(ln)}</text>`); y += 20; }
   y += 10;
-  el.push(`<text x="${W / 2}" y="${y}" font-size="14" text-anchor="middle"><tspan font-weight="700" fill="${fg}">${xmlEsc(s.name)}</tspan><tspan fill="${dim}">  ·  </tspan><tspan fill="${acc}">${xmlEsc(stageDisplayName(s))}</tspan><tspan fill="${dim}">  ·  ${s.xp} XP</tspan></text>`);
+  // Number(s.xp) — load() already coerces, but renderSvg is exported API and
+  // this card gets published; a hostile xp must never reach the markup raw.
+  el.push(`<text x="${W / 2}" y="${y}" font-size="14" text-anchor="middle"><tspan font-weight="700" fill="${fg}">${xmlEsc(s.name)}</tspan><tspan fill="${dim}">  ·  </tspan><tspan fill="${acc}">${xmlEsc(stageDisplayName(s))}</tspan><tspan fill="${dim}">  ·  ${Number(s.xp) || 0} XP</tspan></text>`);
   y += 26;
   const barX = pad + 52, barW = W - pad - barX - 46;
   for (const [label, val] of [['Food', s.hunger], ['Mood', s.happiness], ['Life', s.health], ['Rest', s.energy]]) {
@@ -346,7 +364,7 @@ ${el.join('\n')}
 }
 
 // ---------- config ----------
-const DECAY_SPEEDS = { chill: 0.5, normal: 1, hardcore: 2 };
+const DECAY_SPEEDS = { __proto__: null, chill: 0.5, normal: 1, hardcore: 2 }; // keyed by user input — see THEMES
 let decayMult = 1;
 export function setDecay(name) { if (DECAY_SPEEDS[name] != null) decayMult = DECAY_SPEEDS[name]; return decayMult; }
 function defaultConfig() { return { theme: 'classic', decay: 'normal', animations: true }; }
@@ -365,7 +383,10 @@ function applyConfig() { const c = loadConfig(); setTheme(c.theme); setDecay(c.d
 
 // ---------- state ----------
 export function cleanName(n) {
-  return stripAnsi(String(n == null ? '' : n)).replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 20) || 'Pet';
+  const t = stripAnsi(String(n == null ? '' : n)).replace(/[\x00-\x1f\x7f]/g, '').trim();
+  // Cap by code points, not UTF-16 units — .slice() could halve a surrogate
+  // pair and leave a lone half that breaks JSON round-trips and renders as �.
+  return [...t].slice(0, 20).join('') || 'Pet';
 }
 export function defaultState() {
   const now = Date.now();
@@ -375,7 +396,7 @@ export function defaultState() {
     species: pickSpecies(),
     born: now,
     xp: 0, hunger: 75, happiness: 70, health: 100, energy: 80,
-    streakDays: 0, lastStreakDay: null,
+    streakDays: 0, bestStreak: 0, lastStreakDay: null,
     totalCommits: 0, totalTestsPassed: 0, totalTestsFailed: 0, totalBuilds: 0,
     revives: 0, nightFeed: false, dawnFeed: false, longestAbsenceDays: 0,
     history: [], achievements: [],
@@ -387,15 +408,27 @@ export function load() {
   ensureDir();
   let s = null;
   try { s = JSON.parse(fs.readFileSync(stateFile(), 'utf8')); } catch { s = null; }
-  if (!s || typeof s !== 'object') s = defaultState();
-  else s = { ...defaultState(), ...s };
+  const def = defaultState();
+  if (!s || typeof s !== 'object') s = def;
+  else s = { ...def, ...s };
   s.name = cleanName(s.name);
   if (!SPECIES[s.species]) s.species = pickSpecies(); // legacy/invalid -> assign one (persisted on next save)
+  // A hand-edited or corrupt state must not smuggle strings/NaN into the stat
+  // math (or, via `card`, raw markup into the shared SVG) — every field that
+  // defaults to a number must load as a finite number.
+  for (const k of Object.keys(def)) {
+    if (typeof def[k] === 'number' && (typeof s[k] !== 'number' || !Number.isFinite(s[k]))) s[k] = def[k];
+  }
   if (!Array.isArray(s.history)) s.history = [];
+  s.history = s.history.filter((h) => h && typeof h === 'object' && Number.isFinite(h.n));
   if (!Array.isArray(s.achievements)) s.achievements = [];
+  s.achievements = s.achievements.filter((a) => typeof a === 'string');
   applyDecay(s);
   return s;
 }
+// Load-modify-save is unlocked: concurrent writers (a commit hook racing a
+// prompt tick) are last-writer-wins. The tmp+rename below keeps each write
+// atomic, so a race can only drop an increment, never corrupt the file.
 export function save(s) {
   ensureDir();
   const tmp = `${stateFile()}.${process.pid}.tmp`;
@@ -414,9 +447,11 @@ function writeSegment(s) {
 export function applyDecay(s, now = Date.now()) {
   let hrs = (now - (s.lastDecay || now)) / 3.6e6;
   if (!(hrs > 0)) { s.lastDecay = now; return; }
-  if (hrs > 240) hrs = 240; // cap runaway decay at ~10 days
+  // Measure the true absence before capping — the cap bounds stat decay, not
+  // the record (Prodigal Pet needs 14 days, past the 10-day cap).
   const days = hrs / 24;
   if (days > (s.longestAbsenceDays || 0)) s.longestAbsenceDays = Math.floor(days);
+  if (hrs > 240) hrs = 240; // cap runaway decay at ~10 days
   const d = hrs * decayMult;
   s.hunger = clamp(s.hunger - 4 * d);
   s.happiness = clamp(s.happiness - 3 * d);
@@ -433,6 +468,7 @@ export function updateStreak(s, now = new Date()) {
   if (s.lastStreakDay === k) return;
   const y = new Date(now); y.setDate(y.getDate() - 1);
   s.streakDays = s.lastStreakDay === dayKey(y) ? (s.streakDays || 0) + 1 : 1;
+  if (s.streakDays > (s.bestStreak || 0)) s.bestStreak = s.streakDays;
   s.lastStreakDay = k;
 }
 function recordCommitDay(s, now = new Date()) {
@@ -602,14 +638,16 @@ exit 0
 `;
 const HOOK_LINE = 'command -v shellmon >/dev/null 2>&1 && shellmon commit --quiet >/dev/null 2>&1';
 
+// The segment path honors SHELLMON_HOME (like the CLI does) with the same
+// ~/.shellmon fallback, so a relocated home doesn't leave the prompt stale.
 export function snippetFor(shell) {
   if (shell === 'zsh') {
     return [
       '# shellmon',
       'setopt PROMPT_SUBST 2>/dev/null',
-      '_shellmon() { ( shellmon tick --quiet & ) ; SHELLMON="$(cat ~/.shellmon/segment 2>/dev/null)" }',
+      '_shellmon() { ( shellmon tick --quiet & ) ; SHELLMON="$(cat "${SHELLMON_HOME:-$HOME/.shellmon}/segment" 2>/dev/null)" }',
       'precmd_functions+=(_shellmon)',
-      "RPROMPT='$SHELLMON'",
+      'RPROMPT="$RPROMPT"\'$SHELLMON\'', // append — a themed RPROMPT survives
     ].join('\n');
   }
   if (shell === 'fish') {
@@ -619,7 +657,9 @@ export function snippetFor(shell) {
       '    command shellmon tick --quiet & ; disown',
       'end',
       'function fish_right_prompt',
-      '    cat ~/.shellmon/segment 2>/dev/null',
+      '    set -l _smd $HOME/.shellmon',
+      '    set -q SHELLMON_HOME; and set _smd $SHELLMON_HOME',
+      '    cat $_smd/segment 2>/dev/null',
       'end',
     ].join('\n');
   }
@@ -627,14 +667,17 @@ export function snippetFor(shell) {
     '# shellmon',
     '_shellmon() { ( shellmon tick --quiet & ) ; }',
     'PROMPT_COMMAND="_shellmon${PROMPT_COMMAND:+;$PROMPT_COMMAND}"',
-    "PS1=\"$PS1\"'$(cat ~/.shellmon/segment 2>/dev/null)'",
+    'PS1="$PS1"\'$(cat "${SHELLMON_HOME:-$HOME/.shellmon}/segment" 2>/dev/null)\'',
   ].join('\n');
 }
 
 function repoHookPath() {
-  const gitDir = execSync('git rev-parse --git-dir', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-  const resolved = path.isAbsolute(gitDir) ? gitDir : path.join(process.cwd(), gitDir);
-  return path.join(resolved, 'hooks', 'post-commit');
+  // --git-path (not --git-dir + '/hooks') so core.hooksPath is honored — in a
+  // husky/lefthook repo, git never reads .git/hooks, and a hook written there
+  // would install "successfully" yet never run.
+  const hooksDir = execSync('git rev-parse --git-path hooks', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  const resolved = path.isAbsolute(hooksDir) ? hooksDir : path.join(process.cwd(), hooksDir);
+  return path.join(resolved, 'post-commit');
 }
 
 function cmdInit() {
@@ -697,7 +740,10 @@ function cmdConfig(argv) {
   }
   if (key === 'theme') { if (!THEMES[val]) { console.error(`unknown theme "${val}". try: ${Object.keys(THEMES).join(', ')}`); process.exit(1); } c.theme = val; }
   else if (key === 'decay') { if (!DECAY_SPEEDS[val]) { console.error('decay must be: chill | normal | hardcore'); process.exit(1); } c.decay = val; }
-  else if (key === 'animations') { c.animations = !(val === 'off' || val === 'false' || val === '0'); }
+  else if (key === 'animations') {
+    if (!['on', 'off', 'true', 'false', '1', '0'].includes(val)) { console.error('animations must be: on | off'); process.exit(1); }
+    c.animations = !(val === 'off' || val === 'false' || val === '0');
+  }
   else { console.error(`unknown config key "${key}" (theme | decay | animations)`); process.exit(1); }
   saveConfig(c);
   applyConfig();
@@ -720,8 +766,12 @@ function cmdThemes() {
 }
 
 function cmdStats() {
-  const s = load(); save(s); writeSegment(s);
+  const s = load();
   const newly = checkAchievements(s);
+  save(s); writeSegment(s);
+  // An unlock triggered by viewing stats deserves its toast too.
+  for (const a of newly) console.log(achievementToast(a));
+  if (newly.length) console.log('');
   const st = stageFor(s.xp);
   const spark = sparkline((s.history || []).map((h) => h.n)) || paint('dim', '(commit something)');
   const rows = [];
@@ -730,7 +780,7 @@ function cmdStats() {
   rows.push({ text: '' });
   rows.push({ text: `commits fed   ${paint('cyan', s.totalCommits)}` });
   rows.push({ text: `tests green   ${paint('green', s.totalTestsPassed)}   ${paint('dim', 'red ' + s.totalTestsFailed)}` });
-  rows.push({ text: `best streak   ${paint('yellow', s.streakDays + 'd')}` });
+  rows.push({ text: `streak        ${paint('yellow', s.streakDays + 'd')}   ${paint('dim', 'best ' + Math.max(s.bestStreak || 0, s.streakDays || 0) + 'd')}` });
   rows.push({ text: `revives       ${paint('magenta', s.revives || 0)}` });
   rows.push({ text: '' });
   rows.push({ text: `${spark}  ${paint('dim', 'commits, last ' + (s.history || []).length + 'd')}` });
@@ -747,7 +797,6 @@ function cmdStats() {
     rows.push({ text: `${mark} ${got ? a.name : paint('dim', a.name)} ${paint('dim', '— ' + a.desc)}` });
   }
   console.log(renderBox(rows, { title: 'stats', accent: st.color }));
-  if (newly.length) save(s);
 }
 
 function cmdUninstall(argv) {
@@ -821,7 +870,10 @@ function cmdRun(argv) {
   const li = head.indexOf('--label');
   const label = li >= 0 ? head[li + 1] : null;
   if (!cmd.length) { console.error('usage: shellmon run [--label test|build|run] -- <command> [args...]'); process.exit(1); }
-  const kind = (label === 'test' || label === 'build' || label === 'run') ? label : classifyCommand(cmd.join(' '));
+  if (li >= 0 && !(label === 'test' || label === 'build' || label === 'run')) {
+    console.error('shellmon run: --label must be test | build | run'); process.exit(1);
+  }
+  const kind = label || classifyCommand(cmd.join(' '));
 
   const res = spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
   if (res.error) { console.error(`shellmon run: ${res.error.code === 'ENOENT' ? `command not found: ${cmd[0]}` : res.error.message}`); process.exit(127); }
@@ -954,10 +1006,28 @@ It feeds on commits, test results, and care. It wilts from neglect.`);
 }
 
 // ---------- dispatch ----------
+// The slice of argv that belongs to shellmon itself. Everything after `--` is
+// a wrapped command's, and for `run` so is everything from the first non-flag
+// token — `shellmon run -- node -v` must run `node -v`, not print our version.
+function ownFlags(argv) {
+  const sep = argv.indexOf('--');
+  const own = sep >= 0 ? argv.slice(0, sep) : argv.slice();
+  if ((own[0] || '').toLowerCase() !== 'run') return own;
+  const head = [own[0]];
+  for (let i = 1; i < own.length; i++) {
+    const a = own[i];
+    if (a === '--quiet' || a === '-q') head.push(a);
+    else if (a === '--label') { head.push(a); if (i + 1 < own.length) head.push(own[++i]); }
+    else break;
+  }
+  return head;
+}
+
 export async function main(argvIn = process.argv.slice(2)) {
   applyConfig();
   const argv = argvIn;
-  const has = (f) => argv.includes(f);
+  const own = ownFlags(argv);
+  const has = (f) => own.includes(f);
   const quiet = has('--quiet') || has('-q');
   const cfg = loadConfig();
   // Animate the reveal by default in a real terminal; off for hooks, pipes,

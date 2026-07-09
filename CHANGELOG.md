@@ -4,6 +4,59 @@ All notable changes to shellmon. Format follows
 [Keep a Changelog](https://keepachangelog.com); versioning is
 [SemVer](https://semver.org).
 
+## [3.2.0]
+
+Hardening release: a full audit of the CLI, with a regression test locking in
+every fix.
+
+### Fixed
+- **`shellmon run` swallowed the wrapped command's `-v`/`--version`/`-h`/`--help`.**
+  The global flag scan read the whole argv, so `shellmon run -- node -v` printed
+  *shellmon's* version and never ran the command — breaking the transparent-wrapper
+  promise. Flags are now only shellmon's own before `--` (and for `run`, only the
+  leading ones); everything else reaches the child untouched.
+- **Prototype-chain names could brick the pet.** `SPECIES`, `THEMES`, and the
+  decay table were plain objects, so `shellmon species constructor` passed the
+  existence check, saved, and made every subsequent render crash — and
+  `shellmon config decay constructor` turned the decay multiplier into a
+  function, silently wiping the pet's stats to NaN on the next tick. The lookup
+  tables now have a null prototype; inherited keys are rejected like any other
+  typo.
+- **`shellmon init` installed the git hook where git never looks** in repos
+  using `core.hooksPath` (husky, lefthook, …) — it reported success while the
+  flagship feature silently did nothing. The hook path now comes from
+  `git rev-parse --git-path hooks`, which honors the setting; `doctor` and
+  `uninstall` follow suit.
+- **The Prodigal Pet secret was mathematically unobtainable.** The absence was
+  measured *after* the 10-day decay cap, so `longestAbsenceDays` could never
+  reach the required 14. The true absence is now recorded before the cap (which
+  still bounds stat decay).
+- **A tampered `state.json` could inject markup into the shareable SVG.**
+  Numeric fields weren't validated on load, so a string `xp` flowed raw into
+  `shellmon card` output. Every numeric field is now coerced to a finite number
+  on load (falling back to its default), and `renderSvg` coerces `xp` again as
+  a belt-and-braces for library callers.
+- **Wide characters sheared the card.** Width was counted in UTF-16 code units,
+  so a pet named 猫猫猫 (or an emoji name) broke the box borders. Rendering now
+  measures display columns — CJK and emoji count two, combining marks zero —
+  and names are capped by code points so a surrogate pair is never split in half.
+- **`shellmon config animations` with no value** silently set it to `true` and
+  reported `✓ animations = undefined`; it now demands an explicit `on`/`off`.
+- **`FORCE_COLOR=0` forced color *on*.** Zero now disables, per convention.
+- **`run --label bogus`** silently fell back to auto-classification; unknown
+  labels are now rejected with a usage error.
+- **`stats` unlocked achievements silently.** An unlock triggered by viewing
+  stats now gets its toast like everywhere else.
+- **The zsh snippet clobbered an existing `RPROMPT`**; it now appends, matching
+  the bash snippet's treatment of `PS1`. All prompt snippets also honor
+  `SHELLMON_HOME` (with the usual `~/.shellmon` fallback) instead of hardcoding
+  the path.
+
+### Changed
+- **`stats` now shows an honest streak line.** The old `best streak` label
+  actually displayed the *current* streak. The pet now tracks a real
+  `bestStreak` across resets, and `stats` shows both.
+
 ## [3.1.0]
 
 ### Added

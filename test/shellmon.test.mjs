@@ -18,7 +18,7 @@ import {
   classifyCommand, buildResult, activity, applyEvent, reactionFor,
   SPECIES, artFor, pickSpecies, elderBranch, stageDisplayName,
   blinkFace, renderWatchFrame, screenFrame, VERSION, renderSvg, hexOf,
-  achievementToast,
+  achievementToast, snippetFor,
 } from '../cli.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
@@ -177,11 +177,16 @@ test('applyDecay ignores a backwards clock', () => {
   applyDecay(s, T); // "now" is earlier than lastDecay
   assert.equal(s.hunger, 60); assert.equal(s.lastDecay, T);
 });
-test('applyDecay records longest absence and caps runaway decay', () => {
+test('applyDecay records the TRUE absence, not the decay-capped one', () => {
+  // The 240h cap bounds stat decay only. Measuring the absence after capping
+  // made Prodigal Pet (14 days away) mathematically unobtainable.
   const T = 1_000_000_000_000;
   const s = { ...defaultState(), lastDecay: T };
-  applyDecay(s, T + 500 * 3.6e6); // 500h, capped to 240h (10 days)
-  assert.equal(s.longestAbsenceDays, 10);
+  applyDecay(s, T + 500 * 3.6e6); // 500h away ≈ 20.8 days
+  assert.equal(s.longestAbsenceDays, 20);
+  const away15 = { ...defaultState(), lastDecay: T };
+  applyDecay(away15, T + 15 * 24 * 3.6e6);
+  assert.ok(checkAchievements(away15).map((a) => a.id).includes('prodigal'), 'Prodigal Pet is reachable again');
 });
 test('decay speed multiplier applies', () => {
   const T = 1_000_000_000_000;
@@ -536,4 +541,124 @@ test('CLI: tick throttles state writes but refreshes the segment', () => {
   run(['tick', '--force']); // forced => rewrites
   const mtime3 = fs.statSync(path.join(d, 'state.json')).mtimeMs;
   assert.ok(mtime3 >= mtime2);
+});
+
+// ---------- regressions: the 3.2.0 audit ----------
+test('CLI: run passes a wrapped command\'s -v/--help through untouched', () => {
+  freshHome();
+  // With `--`: everything after it belongs to the child.
+  const v = run(['run', '-q', '--', 'node', '-v']);
+  assert.match(v.trim(), /^v\d+\./, 'node -v ran; shellmon did not print its own version');
+  const h = run(['run', '-q', '--', 'node', '--help']);
+  assert.match(h, /Usage: node/, 'node --help ran; shellmon did not print its own usage');
+  // Without `--`: the command starts at the first non-flag token.
+  const v2 = run(['run', '-q', 'node', '-v']);
+  assert.match(v2.trim(), /^v\d+\./);
+  // shellmon's own flags still work when no command is being wrapped.
+  assert.equal(run(['-v']).trim(), `shellmon ${VERSION}`);
+});
+test('prototype-chain keys cannot poison the lookup tables', () => {
+  assert.equal(THEMES['constructor'], undefined);
+  assert.equal(SPECIES['toString'], undefined);
+  // A hand-edited species falls back to a real one instead of crashing render.
+  const d = freshHome();
+  fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ name: 'X', species: 'constructor' }));
+  assert.ok(Object.keys(SPECIES).includes(load().species));
+});
+test('CLI: species/config reject prototype-chain names instead of bricking the pet', () => {
+  freshHome();
+  assert.equal(runFail(['species', 'constructor']).status, 1);
+  assert.equal(runFail(['config', 'theme', 'constructor']).status, 1);
+  assert.equal(runFail(['config', 'decay', 'constructor']).status, 1);
+  assert.ok(run([]).includes('╭'), 'the pet still renders after the rejected attempts');
+});
+test('CLI: init honors core.hooksPath (husky-style repos)', () => {
+  const d = freshHome();
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-repo-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'core.hooksPath', '.husky'], { cwd: repo });
+    execFileSync('node', [CLI, 'init'], { cwd: repo, encoding: 'utf8', env: { ...process.env, SHELLMON_HOME: d, NO_COLOR: '1' } });
+    assert.ok(fs.existsSync(path.join(repo, '.husky', 'post-commit')), 'hook lands where git actually looks');
+    assert.ok(!fs.existsSync(path.join(repo, '.git', 'hooks', 'post-commit')), 'nothing written to the dir git ignores');
+  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+});
+test('load coerces corrupt numeric fields back to finite numbers', () => {
+  const d = freshHome();
+  fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({
+    name: 'N', xp: '<script>', hunger: null, health: 'NaN',
+    history: [{ day: 'x', n: 'lots' }], achievements: ['ok', 42],
+  }));
+  const s = load();
+  for (const k of ['xp', 'hunger', 'health']) assert.ok(Number.isFinite(s[k]), `${k} loads as a finite number`);
+  assert.deepEqual(s.history, []); // entries with non-numeric counts are dropped
+  assert.deepEqual(s.achievements, ['ok']);
+});
+test('renderSvg never leaks markup from a hostile xp (exported-API hardening)', () => {
+  const svg = renderSvg({ ...defaultState(), xp: '"/><script>alert(1)</script>' });
+  assert.ok(!svg.includes('<script>'));
+});
+test('CLI: card built from a tampered state file contains no injected markup', () => {
+  const d = freshHome();
+  run([]);
+  const p = path.join(d, 'state.json');
+  const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+  s.xp = '0"/><script>alert(1)</script>';
+  fs.writeFileSync(p, JSON.stringify(s));
+  assert.ok(!run(['card']).includes('<script>'));
+});
+test('CLI: config animations requires an explicit on/off', () => {
+  freshHome();
+  const e = runFail(['config', 'animations']);
+  assert.equal(e.status, 1);
+  assert.match(e.stderr, /on \| off/);
+  assert.match(run(['config', 'animations', 'off']), /animations = off/);
+});
+test('updateStreak tracks the best streak across resets', () => {
+  const s = { lastStreakDay: null, streakDays: 0, bestStreak: 0 };
+  updateStreak(s, new Date(2026, 5, 13));
+  updateStreak(s, new Date(2026, 5, 14));
+  updateStreak(s, new Date(2026, 5, 15));
+  assert.equal(s.bestStreak, 3);
+  updateStreak(s, new Date(2026, 5, 20)); // gap: the current streak resets, the best survives
+  assert.equal(s.streakDays, 1);
+  assert.equal(s.bestStreak, 3);
+});
+test('vlen measures display columns: CJK and emoji double, combining marks zero', () => {
+  assert.equal(vlen('猫猫猫'), 6);
+  assert.equal(vlen('🐉'), 2);
+  assert.equal(vlen('e\u0301'), 1); // e + combining accent
+  assert.equal(vlen('✦●▁█╭'), 5); // the UI's own glyphs stay single-width
+});
+test('renderBox stays rectangular around a wide-character name', () => {
+  const lines = renderBox([{ text: '猫猫猫' }, { text: 'plain line' }]).split('\n');
+  assert.equal(new Set(lines.map(vlen)).size, 1);
+});
+test('cleanName caps by code points and never splits a surrogate pair', () => {
+  const n = cleanName('🐉'.repeat(30));
+  assert.equal([...n].length, 20);
+  assert.doesNotThrow(() => encodeURIComponent(n)); // throws on a lone surrogate
+});
+test('CLI: FORCE_COLOR=0 disables color, per convention', () => {
+  freshHome();
+  const env = { ...process.env, FORCE_COLOR: '0' };
+  delete env.NO_COLOR;
+  const out = execFileSync('node', [CLI, 'status'], { encoding: 'utf8', env });
+  assert.ok(!out.includes('\x1b['));
+});
+test('CLI: run rejects an unknown --label instead of silently guessing', () => {
+  freshHome();
+  const e = runFail(['run', '--label', 'bogus', '--', 'sh', '-c', 'exit 0']);
+  assert.equal(e.status, 1);
+  assert.match(e.stderr, /--label must be/);
+});
+test('prompt snippets append (never clobber) and honor SHELLMON_HOME', () => {
+  assert.ok(snippetFor('zsh').includes('RPROMPT="$RPROMPT"'), 'zsh appends to an existing RPROMPT');
+  for (const sh of ['bash', 'zsh']) assert.ok(snippetFor(sh).includes('${SHELLMON_HOME:-$HOME/.shellmon}'), `${sh} snippet honors SHELLMON_HOME`);
+  assert.ok(snippetFor('fish').includes('SHELLMON_HOME'));
+});
+test('CLI: stats announces achievements it unlocks', () => {
+  const d = freshHome();
+  fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ name: 'T', xp: 10 }));
+  assert.match(run(['stats']), /achievement: It's Alive/);
 });
