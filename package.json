@@ -4,7 +4,7 @@
   "description": "A terminal pet that feeds on your dev activity — any test runner, any build, any command. Species, live watch mode, achievements, themes. Zero dependencies.",
   "type": "module",
   "bin": {
-    "shellmon": "./cli.mjs"
+    "shellmon": "cli.mjs"
   },
   "files": [
     "cli.mjs"
