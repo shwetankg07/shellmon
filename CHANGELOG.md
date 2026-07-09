@@ -7,6 +7,12 @@ All notable changes to shellmon. Format follows
 ## [3.1.0]
 
 ### Added
+- **More achievements, and secret ones.** Twelve new achievements — higher tiers
+  (Centurion, Green Machine, Master Builder, Unstoppable) plus eight **hidden**
+  secrets that read as `???` in `shellmon stats` until you stumble into them
+  (Early Bird, Picture of Health, Busy Bee, Renaissance Dev, Battle-Scarred,
+  Comeback Kid, Prodigal Pet, and a Completionist meta-secret). Secrets unlock
+  with their own louder reveal toast; `stats` teases how many are left to find.
 - **Shareable SVG card.** `shellmon card` exports a polished, self-contained SVG
   of your pet — themed accent, the creature, real stat bars, sparkline, and quip
   — ready to drop into a GitHub profile README (`shellmon card > pet.svg`).
@@ -25,6 +31,10 @@ All notable changes to shellmon. Format follows
 - **Creature art drifted off-centre** in the terminal card: rows were centered
   independently, so unequal-width lines (like the egg) landed a column or two
   apart. Art is now trimmed before centering, so every creature stacks true.
+- **`watch` left ghost box borders** as the pet fed and evolved. The box width
+  tracks its content (XP digits, quip, art), so a narrower frame drawn over a
+  wider one left the old right border behind — the `│` edges stacked up as
+  doubled and tripled sides. Each line is now erased to end-of-line on redraw.
 
 ## [3.0.0]
 

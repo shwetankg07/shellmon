@@ -17,7 +17,8 @@ import {
   defaultState, load, save, segmentOf, setTheme, setDecay, THEMES,
   classifyCommand, buildResult, activity, applyEvent, reactionFor,
   SPECIES, artFor, pickSpecies, elderBranch, stageDisplayName,
-  blinkFace, renderWatchFrame, VERSION, renderSvg, hexOf,
+  blinkFace, renderWatchFrame, screenFrame, VERSION, renderSvg, hexOf,
+  achievementToast,
 } from '../cli.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
@@ -242,6 +243,44 @@ test('reaching Elder unlocks all XP milestones at once', () => {
   const ids = checkAchievements(s).map((a) => a.id);
   for (const id of ['hatch', 'critter', 'beast', 'elder']) assert.ok(ids.includes(id));
 });
+test('every achievement has a unique id and every secret is flagged hidden', () => {
+  const ids = ACHIEVEMENTS.map((a) => a.id);
+  assert.equal(new Set(ids).size, ids.length, 'ids are unique');
+  assert.ok(ACHIEVEMENTS.some((a) => a.hidden), 'at least one secret exists');
+  for (const a of ACHIEVEMENTS) assert.equal(typeof a.test, 'function');
+});
+test('secret achievements unlock from their signals', () => {
+  const dawn = { ...defaultState(), dawnFeed: true };
+  assert.ok(checkAchievements(dawn).map((a) => a.id).includes('earlybird'));
+  const healthy = { ...defaultState(), hunger: 100, happiness: 96, health: 100, energy: 98 };
+  assert.ok(checkAchievements(healthy).map((a) => a.id).includes('perfect'));
+  const busy = { ...defaultState(), history: [{ day: 'x', n: 12 }] };
+  assert.ok(checkAchievements(busy).map((a) => a.id).includes('busybee'));
+});
+test('completionist unlocks once every visible achievement is earned', () => {
+  const visible = ACHIEVEMENTS.filter((a) => !a.hidden).map((a) => a.id);
+  // Seed a state that already holds every visible achievement.
+  const s = { ...defaultState(), achievements: [...visible] };
+  const ids = checkAchievements(s).map((a) => a.id);
+  assert.ok(ids.includes('completionist'), 'meta secret pops when the visible set is complete');
+  // A pet missing even one visible achievement does not get it.
+  const partial = { ...defaultState(), achievements: visible.slice(0, -1) };
+  assert.ok(!checkAchievements(partial).map((a) => a.id).includes('completionist'));
+});
+test('achievementToast marks secrets differently from regular unlocks', () => {
+  const secret = ACHIEVEMENTS.find((a) => a.hidden);
+  const regular = ACHIEVEMENTS.find((a) => !a.hidden);
+  assert.match(stripAnsi(achievementToast(secret)), /secret unlocked:/);
+  assert.match(stripAnsi(achievementToast(regular)), /achievement:/);
+  assert.ok(stripAnsi(achievementToast(regular)).includes(regular.name));
+});
+test('CLI: stats masks locked secrets as ??? but reveals earned ones', () => {
+  freshHome();
+  const locked = run(['stats']);
+  assert.ok(locked.includes('???'), 'a fresh pet sees mystery slots, not the secret names');
+  assert.ok(!locked.includes('Early Bird'), 'a locked secret name stays hidden');
+  assert.match(locked, /secrets? to find/, 'stats hints that secrets exist');
+});
 
 // ---------- activity sensing (beyond git) ----------
 test('classifyCommand recognizes test / build / generic commands', () => {
@@ -343,6 +382,19 @@ test('renderWatchFrame draws the card, a pulse, and the hotkey hints', () => {
   assert.ok(f0.includes('╭') && /feed/.test(f0) && /quit/.test(f0));
   assert.ok(f0.includes('●')); // even frame => filled pulse
   assert.ok(renderWatchFrame(s, 1).includes('○')); // odd frame => hollow pulse
+});
+test('screenFrame erases every line to EOL so a narrower frame leaves no ghost border', () => {
+  // The box width tracks its content, so a wide frame followed by a narrow one
+  // used to leave the wide frame's right border behind. screenFrame must erase
+  // each line to end-of-line (\x1b[K) so nothing lingers past the new content.
+  const out = screenFrame('wide line here\nx');
+  assert.ok(out.startsWith('\x1b[H'), 'homes the cursor first');
+  const lines = out.split('\n');
+  // Every rendered line carries a clear-to-EOL; the tail clears below.
+  assert.ok(lines.every((l) => l.includes('\x1b[K')), 'each line erased to EOL');
+  assert.ok(out.endsWith('\x1b[J'), 'clears any rows a taller frame left below');
+  // The visible text survives intact.
+  assert.ok(out.includes('wide line here') && out.includes('x'));
 });
 test('CLI: card emits SVG, and --plain emits an uncolored box', () => {
   freshHome();

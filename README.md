@@ -5,7 +5,7 @@
 > live full-screen mode. Zero dependencies.
 
 [![npm](https://img.shields.io/npm/v/shellmon)](https://www.npmjs.com/package/shellmon)
-[![CI](https://github.com/shwetank/shellmon/actions/workflows/ci.yml/badge.svg)](https://github.com/shwetank/shellmon/actions/workflows/ci.yml)
+[![CI](https://github.com/shwetankg07/shellmon/actions/workflows/ci.yml/badge.svg)](https://github.com/shwetankg07/shellmon/actions/workflows/ci.yml)
 [![node](https://img.shields.io/node/v/shellmon)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](./package.json)
 [![license](https://img.shields.io/npm/l/shellmon)](./LICENSE)
@@ -136,9 +136,11 @@ something goes right, `shellmon party`.
 
 ## Achievements & themes
 
-Twelve **achievements** unlock as you go (streak tiers, 100 commits fed, 50 green
-tests, reviving from a faint, Night Owl, Survivor…) — see them in `shellmon
-stats`. Eight zero-dependency truecolor **themes**: `classic`, `matrix`,
+Two dozen **achievements** unlock as you go — streak tiers, commit and test
+milestones, reviving from a faint, Night Owl, Survivor… see them in `shellmon
+stats`. Some are **secret**: they show as `???` until you trip over them, so
+there's always something left to discover. Eight zero-dependency truecolor
+**themes**: `classic`, `matrix`,
 `dracula`, `gruvbox`, `nord`, `tokyonight`, `synthwave`, `catppuccin`. Preview
 with `shellmon themes`, set with `shellmon config theme <name>`.
 

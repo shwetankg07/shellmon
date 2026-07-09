@@ -174,6 +174,9 @@ export function quipFor(s, now = Date.now()) {
 }
 
 // ---------- achievements ----------
+// `hidden: true` achievements don't show their name/desc until earned — they
+// read as `???` in `stats`, so stumbling into one is a genuine surprise. The
+// unlock toast is where the reveal (and the fun) lands.
 export const ACHIEVEMENTS = [
   { id: 'hatch',      name: 'It\'s Alive',      desc: 'hatch your egg',                test: (s) => s.xp >= 10 },
   { id: 'critter',    name: 'Growing Up',       desc: 'reach the Critter stage',       test: (s) => s.xp >= 50 },
@@ -182,20 +185,44 @@ export const ACHIEVEMENTS = [
   { id: 'streak3',    name: 'Warming Up',       desc: 'a 3-day streak',                test: (s) => s.streakDays >= 3 },
   { id: 'streak7',    name: 'Habit Formed',     desc: 'a 7-day streak',                test: (s) => s.streakDays >= 7 },
   { id: 'streak30',   name: 'Machine',          desc: 'a 30-day streak',               test: (s) => s.streakDays >= 30 },
+  { id: 'streak100',  name: 'Unstoppable',      desc: 'a 100-day streak',              test: (s) => s.streakDays >= 100 },
   { id: 'commits100', name: 'Well Fed',         desc: 'feed it 100 commits',           test: (s) => s.totalCommits >= 100 },
+  { id: 'commits500', name: 'Centurion',        desc: 'feed it 500 commits',           test: (s) => s.totalCommits >= 500 },
   { id: 'green50',    name: 'Test Driven',      desc: '50 passing tests',              test: (s) => s.totalTestsPassed >= 50 },
+  { id: 'green200',   name: 'Green Machine',    desc: '200 passing tests',             test: (s) => s.totalTestsPassed >= 200 },
+  { id: 'builds50',   name: 'Master Builder',   desc: '50 clean builds',               test: (s) => (s.totalBuilds || 0) >= 50 },
   { id: 'phoenix',    name: 'Phoenix',          desc: 'revive it from a faint',        test: (s) => (s.revives || 0) >= 1 },
   { id: 'nightowl',   name: 'Night Owl',        desc: 'feed it after midnight',        test: (s) => !!s.nightFeed },
   { id: 'survivor',   name: 'Survivor',         desc: 'return after 3+ days away',     test: (s) => (s.longestAbsenceDays || 0) >= 3 },
+  // ---- secrets: hidden until earned ----
+  { id: 'earlybird',  name: 'Early Bird',       desc: 'feed it at the crack of dawn',  test: (s) => !!s.dawnFeed, hidden: true },
+  { id: 'perfect',    name: 'Picture of Health', desc: 'every stat above 95 at once',  test: (s) => Math.min(s.hunger, s.happiness, s.health, s.energy) >= 95, hidden: true },
+  { id: 'busybee',    name: 'Busy Bee',         desc: '12 commits in a single day',    test: (s) => Math.max(0, ...((s.history || []).map((h) => h.n))) >= 12, hidden: true },
+  { id: 'renaissance', name: 'Renaissance Dev',  desc: 'a commit, a green test, and a clean build', test: (s) => s.totalCommits >= 1 && s.totalTestsPassed >= 1 && (s.totalBuilds || 0) >= 1, hidden: true },
+  { id: 'battlescars', name: 'Battle-Scarred',  desc: 'weather 50 failing tests',      test: (s) => (s.totalTestsFailed || 0) >= 50, hidden: true },
+  { id: 'comeback',   name: 'Comeback Kid',     desc: 'bring it back from the brink 5 times', test: (s) => (s.revives || 0) >= 5, hidden: true },
+  { id: 'prodigal',   name: 'Prodigal Pet',     desc: 'return after two full weeks away', test: (s) => (s.longestAbsenceDays || 0) >= 14, hidden: true },
+  { id: 'completionist', name: 'Completionist', desc: 'earn every one of the visible achievements', test: (s, have) => VISIBLE_IDS.every((id) => have.has(id)), hidden: true },
 ];
+// Computed after ACHIEVEMENTS is defined; the `completionist` test closes over
+// it and only runs later, so the forward reference is safe.
+const VISIBLE_IDS = ACHIEVEMENTS.filter((a) => !a.hidden).map((a) => a.id);
 export function checkAchievements(s) {
   const have = new Set(s.achievements || []);
   const newly = [];
+  // `have` is passed so meta-achievements (completionist) can see siblings that
+  // just unlocked in this same pass — those secrets sit last in the list.
   for (const a of ACHIEVEMENTS) {
-    if (!have.has(a.id) && a.test(s)) { have.add(a.id); newly.push(a); }
+    if (!have.has(a.id) && a.test(s, have)) { have.add(a.id); newly.push(a); }
   }
   s.achievements = [...have];
   return newly;
+}
+// The unlock toast — secrets get a distinct, louder reveal.
+export function achievementToast(a) {
+  return a.hidden
+    ? paint('magenta', '✦ secret unlocked: ') + paint('b', a.name) + paint('dim', ` — ${a.desc}`)
+    : paint('yellow', '✦ achievement: ') + paint('b', a.name) + paint('dim', ` — ${a.desc}`);
 }
 
 // ---------- rendering ----------
@@ -350,7 +377,7 @@ export function defaultState() {
     xp: 0, hunger: 75, happiness: 70, health: 100, energy: 80,
     streakDays: 0, lastStreakDay: null,
     totalCommits: 0, totalTestsPassed: 0, totalTestsFailed: 0, totalBuilds: 0,
-    revives: 0, nightFeed: false, longestAbsenceDays: 0,
+    revives: 0, nightFeed: false, dawnFeed: false, longestAbsenceDays: 0,
     history: [], achievements: [],
     lastFed: now, lastActive: now, lastDecay: now, lastTick: 0,
     alive: true,
@@ -418,7 +445,11 @@ function recordCommitDay(s, now = new Date()) {
 }
 export { recordCommitDay as recordCommit };
 function reviveIfPossible(s) { if (!s.alive && s.health > 0) { s.alive = true; s.revives = (s.revives || 0) + 1; } }
-function markNightFeed(s, now = new Date()) { const h = now.getHours(); if (h >= 0 && h < 5) s.nightFeed = true; }
+function markNightFeed(s, now = new Date()) {
+  const h = now.getHours();
+  if (h >= 0 && h < 5) s.nightFeed = true;   // Night Owl
+  if (h >= 5 && h < 7) s.dawnFeed = true;    // Early Bird (secret)
+}
 
 // ---------- interactions ----------
 export function feed(s) {
@@ -531,6 +562,17 @@ export function renderWatchFrame(s, frame = 0) {
   return `${hover}${card}\n  ${pulse} ${paint('dim', quipFor(s))}\n  ${keys}`;
 }
 
+// Encode a frame for the alt-screen redraw. The box width tracks its content
+// (XP digits grow, the stage name changes on evolution, the quip changes), so
+// consecutive frames differ in width. Cursor-home + write + clear-below is not
+// enough: a narrower frame leaves the previous, wider frame's right border in
+// place, so the `│` edges stack up as ghostly "double/triple" sides. Erasing
+// each line to end-of-line (\x1b[K) as we draw wipes those trailing glyphs;
+// the final \x1b[J clears any rows a taller previous frame left below.
+export function screenFrame(body) {
+  return '\x1b[H' + body.split('\n').join('\x1b[K\n') + '\x1b[K\x1b[J';
+}
+
 // ---------- act: run a mutation, handle evolution + achievements + output ----------
 async function act(mutate, { quiet, animate }) {
   const s = load();
@@ -543,7 +585,7 @@ async function act(mutate, { quiet, animate }) {
   writeSegment(s);
   if (quiet) return;
   if (evolved) console.log(paint(evolved.color, `★ ${s.name} evolved into a ${evolved.name}!`) + '\n');
-  for (const a of newly) console.log(paint('yellow', `✦ achievement: ${a.name}`) + paint('dim', ` — ${a.desc}`));
+  for (const a of newly) console.log(achievementToast(a));
   if (newly.length) console.log('');
   await printCard(renderCard(s), animate);
 }
@@ -693,10 +735,16 @@ function cmdStats() {
   rows.push({ text: '' });
   rows.push({ text: `${spark}  ${paint('dim', 'commits, last ' + (s.history || []).length + 'd')}` });
   rows.push({ text: '' });
-  rows.push({ text: paint('b', `achievements  ${(s.achievements || []).length}/${ACHIEVEMENTS.length}`) });
+  const have = new Set(s.achievements || []);
+  const secrets = ACHIEVEMENTS.filter((a) => a.hidden && !have.has(a.id)).length;
+  const secretNote = secrets ? paint('magenta', `   + ${secrets} secret${secrets > 1 ? 's' : ''} to find`) : '';
+  rows.push({ text: paint('b', `achievements  ${have.size}/${ACHIEVEMENTS.length}`) + secretNote });
   for (const a of ACHIEVEMENTS) {
-    const got = (s.achievements || []).includes(a.id);
-    rows.push({ text: `${got ? paint('green', '✦') : paint('dim', '·')} ${got ? a.name : paint('dim', a.name)} ${paint('dim', '— ' + a.desc)}` });
+    const got = have.has(a.id);
+    // A locked secret shows as ??? — earning it is the reveal.
+    if (!got && a.hidden) { rows.push({ text: `${paint('dim', '·')} ${paint('magenta', '???')} ${paint('dim', '— hidden achievement')}` }); continue; }
+    const mark = got ? paint(a.hidden ? 'magenta' : 'green', '✦') : paint('dim', '·');
+    rows.push({ text: `${mark} ${got ? a.name : paint('dim', a.name)} ${paint('dim', '— ' + a.desc)}` });
   }
   console.log(renderBox(rows, { title: 'stats', accent: st.color }));
   if (newly.length) save(s);
@@ -791,7 +839,7 @@ function cmdRun(argv) {
     const mood = moodOf(s);
     console.log(paint(mood.color, `» ${reactionFor(kind, pass)}`) + paint('dim', `  (${kind} ${pass ? 'ok' : 'exit ' + code})`));
     if (evolved) console.log(paint(evolved.color, `★ ${s.name} evolved into a ${evolved.name}!`));
-    for (const a of newly) console.log(paint('yellow', `✦ achievement: ${a.name}`) + paint('dim', ` — ${a.desc}`));
+    for (const a of newly) console.log(achievementToast(a));
   }
   process.exit(code);
 }
@@ -811,7 +859,7 @@ function cmdWatch() {
     process.stdout.write('\x1b[?25h\x1b[?1049l'); // show cursor, leave alt screen
   };
   const quit = (code = 0) => { try { const s = load(); save(s); writeSegment(s); } catch { /* best effort */ } cleanup(); process.exit(code); };
-  const draw = () => { const s = load(); process.stdout.write('\x1b[H' + renderWatchFrame(s, frame) + '\x1b[J'); };
+  const draw = () => { const s = load(); process.stdout.write(screenFrame(renderWatchFrame(s, frame))); };
 
   process.stdout.write('\x1b[?1049h\x1b[?25l'); // enter alt screen, hide cursor
   process.on('exit', cleanup); // guarantees the terminal is restored no matter how we die
@@ -927,7 +975,7 @@ export async function main(argvIn = process.argv.slice(2)) {
       const s = load();
       const newly = checkAchievements(s);
       save(s); writeSegment(s);
-      for (const a of newly) console.log(paint('yellow', `✦ achievement: ${a.name}`) + paint('dim', ` — ${a.desc}`));
+      for (const a of newly) console.log(achievementToast(a));
       if (newly.length) console.log('');
       await printCard(renderCard(s), animate);
       break;
