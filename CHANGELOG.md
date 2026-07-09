@@ -22,6 +22,9 @@ All notable changes to shellmon. Format follows
 - **`run` without `--` could drop a command argument** that happened to equal the
   `--label` value (e.g. `run --label test npm test` ran `npm` with no `test`). It
   now consumes only the leading flags and passes the rest through verbatim.
+- **Creature art drifted off-centre** in the terminal card: rows were centered
+  independently, so unequal-width lines (like the egg) landed a column or two
+  apart. Art is now trimmed before centering, so every creature stacks true.
 
 ## [3.0.0]
 

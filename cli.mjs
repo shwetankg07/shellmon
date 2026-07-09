@@ -238,7 +238,10 @@ export function renderCard(s, now = Date.now(), faceOverride = null) {
   rows.push({ text: '' });
   const branch = st.key === 'elder' ? elderBranch(s) : null;
   if (branch && branch.crown) rows.push({ text: paint('yellow', branch.crown), align: 'center' });
-  for (const line of artFor(s.species, st.key, faceOverride || mood.face)) rows.push({ text: paint(st.color, line), align: 'center' });
+  // Trim before centering: the art is authored as a left-aligned block, but each
+  // row is centered independently — trimming centres the visible glyphs so the
+  // (symmetric) creature stacks true instead of drifting on odd/even widths.
+  for (const line of artFor(s.species, st.key, faceOverride || mood.face)) rows.push({ text: paint(st.color, line.trim()), align: 'center' });
   rows.push({ text: '' });
   rows.push({ text: `${paint('b', s.name)} ${paint('dim', '·')} ${paint(st.color, stageDisplayName(s))} ${paint('dim', '·')} ${paint('dim', s.xp + ' XP')}`, align: 'center' });
   const nxt = nextStage(s.xp);
